@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeHos — Проверка сайта</title>
+  <link rel="stylesheet" href="../styles/pages.css">
+</head>
+<body class="waiting-page">
+  <div class="container">
+    <div class="spinner"></div>
+    <h1>Проверяем сайт</h1>
+    <div class="domain-badge" id="domain">загрузка...</div>
+    <p class="subtitle">Этот сайт выглядит подозрительно. Модератор проверяет его прямо сейчас.</p>
+
+    <div class="status-box">
+      <div class="status-dot"></div>
+      <span id="status-text">Ожидаем решения модератора...</span>
+    </div>
+
+    <div class="info-box">
+      <p>Это займёт несколько секунд. Страница откроется автоматически после проверки.</p>
+    </div>
+
+    <button class="btn-back" onclick="history.back()">← Вернуться назад</button>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const domain = params.get('domain') || 'Неизвестный домен';
+    const eventId = params.get('eventId');
+
+    document.getElementById('domain').textContent = domain;
+
+    // Опрашиваем background каждые 2 секунды
+    let checkCount = 0;
+    const checker = setInterval(() => {
+      checkCount++;
+      if (checkCount > 60) { // 2 минуты максимум
+        clearInterval(checker);
+        document.getElementById('status-text').textContent = 'Время ожидания истекло. Обратитесь к модератору.';
+        return;
+      }
+
+      chrome.runtime.sendMessage(
+        { type: 'CHECK_DECISION', eventId },
+        (response) => {
+          if (!response?.waiting) {
+            // Решение принято — background уже обработал редирект
+            clearInterval(checker);
+          }
+        }
+      );
+    }, 2000);
+  </script>
+</body>
+</html>

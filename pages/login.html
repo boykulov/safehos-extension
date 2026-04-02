@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeHos</title>
+  <link rel="stylesheet" href="../styles/pages.css">
+</head>
+<body class="login-page">
+  <div class="container login-container">
+    <div class="logo">🛡️</div>
+    <h1>SafeHos</h1>
+    <p class="subtitle">Защита от фишинга</p>
+
+    <div id="status-bar" class="status-bar" style="display:none"></div>
+
+    <div id="login-form">
+      <input type="email" id="email" placeholder="Email" class="input" autocomplete="email">
+      <input type="password" id="password" placeholder="Пароль" class="input" autocomplete="current-password">
+      <button class="btn-primary" id="login-btn" onclick="doLogin()">Войти</button>
+    </div>
+
+    <div id="logged-in" style="display:none">
+      <div class="user-info">
+        <span class="user-email" id="user-email"></span>
+        <span class="badge" id="user-role"></span>
+      </div>
+      <div class="protection-status">
+        <div class="status-dot active"></div>
+        <span>Защита активна</span>
+      </div>
+      <button class="btn-secondary" onclick="doLogout()">Выйти</button>
+    </div>
+  </div>
+
+  <script>
+    // Проверяем статус при открытии
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
+      if (response?.loggedIn) {
+        showLoggedIn();
+      }
+    });
+
+    async function doLogin() {
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('login-btn');
+
+      if (!email || !password) {
+        showStatus('Введите email и пароль', 'error');
+        return;
+      }
+
+      btn.textContent = 'Входим...';
+      btn.disabled = true;
+
+      chrome.runtime.sendMessage(
+        { type: 'LOGIN', email, password },
+        (response) => {
+          btn.textContent = 'Войти';
+          btn.disabled = false;
+
+          if (response?.success) {
+            document.getElementById('user-email').textContent = response.user.email;
+            document.getElementById('user-role').textContent = response.user.role;
+            showLoggedIn();
+            showStatus('Вход выполнен успешно!', 'success');
+          } else {
+            showStatus(response?.error || 'Ошибка входа', 'error');
+          }
+        }
+      );
+    }
+
+    function doLogout() {
+      chrome.runtime.sendMessage({ type: 'LOGOUT' }, () => {
+        document.getElementById('logged-in').style.display = 'none';
+        document.getElementById('login-form').style.display = 'block';
+      });
+    }
+
+    function showLoggedIn() {
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('logged-in').style.display = 'block';
+      chrome.storage.session.get('email', (data) => {
+        if (data.email) document.getElementById('user-email').textContent = data.email;
+      });
+      chrome.storage.session.get('role', (data) => {
+        if (data.role) document.getElementById('user-role').textContent = data.role;
+      });
+    }
+
+    function showStatus(msg, type) {
+      const bar = document.getElementById('status-bar');
+      bar.textContent = msg;
+      bar.className = `status-bar ${type}`;
+      bar.style.display = 'block';
+      setTimeout(() => bar.style.display = 'none', 3000);
+    }
+
+    // Enter для входа
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin();
+    });
+  </script>
+</body>
+</html>

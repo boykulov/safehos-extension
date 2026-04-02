@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeHos — Сайт заблокирован</title>
+  <link rel="stylesheet" href="../styles/pages.css">
+</head>
+<body class="blocked-page">
+  <div class="container">
+    <div class="icon-wrap blocked-icon">🚫</div>
+    <h1>Сайт заблокирован</h1>
+    <div class="domain-badge" id="domain">загрузка...</div>
+    <p class="reason" id="reason">Этот сайт был определён как опасный</p>
+
+    <div class="info-box">
+      <p>Этот сайт может быть фишинговым. Ваши данные в безопасности — SafeHos заблокировал доступ автоматически.</p>
+    </div>
+
+    <div class="contact-box">
+      <p>Если вы считаете что это ошибка — свяжитесь со службой безопасности:</p>
+      <a href="mailto:security@safehos.com" class="contact-link">security@safehos.com</a>
+    </div>
+
+    <button class="btn-back" onclick="history.back()">← Вернуться назад</button>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const domain = params.get('domain') || 'Неизвестный домен';
+    const reason = params.get('reason') || 'Фишинговый сайт';
+    document.getElementById('domain').textContent = domain;
+    document.getElementById('reason').textContent = reason;
+  </script>
+</body>
+</html>
