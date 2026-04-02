@@ -2,35 +2,124 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SafeHos — Сайт заблокирован</title>
-  <link rel="stylesheet" href="../styles/pages.css">
+  <title>SafeHos — Заблокировано</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0d1117; color: #e6edf3;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bg {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center top, rgba(248,81,73,0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .container {
+      max-width: 480px; width: 90%;
+      text-align: center; padding: 48px 32px;
+      position: relative; z-index: 1;
+    }
+    .icon-wrap {
+      width: 88px; height: 88px;
+      background: rgba(248,81,73,0.1);
+      border: 2px solid rgba(248,81,73,0.3);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 40px; margin: 0 auto 28px;
+      animation: shake 0.5s ease 0.3s;
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); }
+      40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+    h1 {
+      font-size: 28px; font-weight: 700;
+      color: #f85149; margin-bottom: 12px;
+    }
+    .domain-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #161b22; border: 1px solid #30363d;
+      padding: 8px 16px; border-radius: 8px;
+      font-family: monospace; font-size: 15px;
+      color: #e6edf3; margin: 16px 0;
+    }
+    .reason-text {
+      color: #7d8590; font-size: 14px;
+      margin-bottom: 28px; line-height: 1.6;
+    }
+    .info-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 12px; padding: 20px;
+      margin-bottom: 24px; text-align: left;
+    }
+    .info-card h3 {
+      font-size: 13px; font-weight: 600;
+      color: #f85149; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .info-card p {
+      font-size: 13px; color: #7d8590; line-height: 1.6;
+    }
+    .contact-row {
+      display: flex; align-items: center; gap: 8px;
+      background: #0d1117; border: 1px solid #30363d;
+      border-radius: 8px; padding: 12px 14px;
+      margin-top: 12px;
+    }
+    .contact-row a {
+      color: #388bfd; text-decoration: none; font-size: 13px;
+    }
+    .btn-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 20px;
+      background: transparent; color: #7d8590;
+      border: 1px solid #30363d; border-radius: 8px;
+      font-size: 13px; cursor: pointer;
+      font-family: inherit; transition: all 0.2s;
+    }
+    .btn-back:hover {
+      border-color: #388bfd; color: #388bfd;
+    }
+    .safehos-badge {
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px; margin-top: 24px;
+      font-size: 11px; color: #484f58;
+    }
+  </style>
 </head>
-<body class="blocked-page">
+<body>
+  <div class="bg"></div>
   <div class="container">
-    <div class="icon-wrap blocked-icon">🚫</div>
+    <div class="icon-wrap">🚫</div>
     <h1>Сайт заблокирован</h1>
-    <div class="domain-badge" id="domain">загрузка...</div>
-    <p class="reason" id="reason">Этот сайт был определён как опасный</p>
+    <div class="domain-badge">
+      <span>⚠️</span>
+      <span id="domain">загрузка...</span>
+    </div>
+    <p class="reason-text" id="reason">Этот сайт определён как опасный</p>
 
-    <div class="info-box">
-      <p>Этот сайт может быть фишинговым. Ваши данные в безопасности — SafeHos заблокировал доступ автоматически.</p>
+    <div class="info-card">
+      <h3>🔍 Почему заблокировано?</h3>
+      <p>SafeHos обнаружил признаки фишинга. Этот сайт может пытаться украсть ваши данные, пароли или корпоративный доступ.</p>
+      <div class="contact-row">
+        <span>📧</span>
+        <a href="mailto:security@safehos.com">security@safehos.com</a>
+      </div>
     </div>
 
-    <div class="contact-box">
-      <p>Если вы считаете что это ошибка — свяжитесь со службой безопасности:</p>
-      <a href="mailto:security@safehos.com" class="contact-link">security@safehos.com</a>
-    </div>
+    <button class="btn-back" onclick="goBack()">← Вернуться назад</button>
 
-    <button class="btn-back" onclick="history.back()">← Вернуться назад</button>
+    <div class="safehos-badge">
+      <span>🛡️</span>
+      <span>Защищено SafeHos</span>
+    </div>
   </div>
-
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const domain = params.get('domain') || 'Неизвестный домен';
-    const reason = params.get('reason') || 'Фишинговый сайт';
-    document.getElementById('domain').textContent = domain;
-    document.getElementById('reason').textContent = reason;
-  </script>
+  <script src="js/blocked.js"></script>
 </body>
 </html>

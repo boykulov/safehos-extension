@@ -4,104 +4,275 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SafeHos</title>
-  <link rel="stylesheet" href="../styles/pages.css">
-</head>
-<body class="login-page">
-  <div class="container login-container">
-    <div class="logo">🛡️</div>
-    <h1>SafeHos</h1>
-    <p class="subtitle">Защита от фишинга</p>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-    <div id="status-bar" class="status-bar" style="display:none"></div>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 340px;
+      min-height: 420px;
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      overflow: hidden;
+    }
+
+    .bg-glow {
+      position: fixed; top: -80px; left: 50%;
+      transform: translateX(-50%);
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, rgba(56,139,253,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .container {
+      padding: 28px 24px;
+      position: relative; z-index: 1;
+    }
+
+    /* Header */
+    .header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 24px;
+    }
+    .shield-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #388bfd, #1f6feb);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 16px rgba(56,139,253,0.4);
+    }
+    .brand h1 { font-size: 17px; font-weight: 700; color: #fff; }
+    .brand p { font-size: 11px; color: #7d8590; margin-top: 1px; }
+
+    /* Status bar */
+    .status-bar {
+      display: none; padding: 9px 12px;
+      border-radius: 8px; font-size: 12px;
+      margin-bottom: 14px; font-weight: 500;
+      animation: fadeIn 0.2s ease;
+    }
+    .status-bar.success {
+      background: rgba(63,185,80,0.15);
+      border: 1px solid rgba(63,185,80,0.3);
+      color: #3fb950;
+    }
+    .status-bar.error {
+      background: rgba(248,81,73,0.15);
+      border: 1px solid rgba(248,81,73,0.3);
+      color: #f85149;
+    }
+
+    /* Form */
+    #login-form { display: flex; flex-direction: column; gap: 10px; }
+
+    .input-group { position: relative; }
+    .input-icon {
+      position: absolute; left: 12px; top: 50%;
+      transform: translateY(-50%);
+      font-size: 14px; opacity: 0.5;
+    }
+    .input {
+      width: 100%; padding: 10px 12px 10px 36px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #e6edf3; font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input:focus { border-color: #388bfd; }
+    .input::placeholder { color: #484f58; }
+
+    .btn-login {
+      width: 100%; padding: 10px;
+      background: linear-gradient(135deg, #388bfd, #1f6feb);
+      color: #fff; border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; margin-top: 4px;
+      font-family: inherit;
+      transition: opacity 0.2s, transform 0.1s;
+      box-shadow: 0 4px 12px rgba(56,139,253,0.3);
+    }
+    .btn-login:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-login:active { transform: translateY(0); }
+    .btn-login:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Logged in state */
+    #logged-in {
+      display: none; flex-direction: column; gap: 16px;
+    }
+
+    .protection-card {
+      background: linear-gradient(135deg, rgba(63,185,80,0.1), rgba(56,139,253,0.1));
+      border: 1px solid rgba(63,185,80,0.2);
+      border-radius: 12px; padding: 16px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .pulse-ring {
+      position: relative; width: 36px; height: 36px;
+      flex-shrink: 0;
+    }
+    .pulse-ring::before {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: 50%;
+      border: 2px solid rgba(63,185,80,0.4);
+      animation: ping 1.5s ease-out infinite;
+    }
+    .pulse-dot {
+      width: 36px; height: 36px;
+      background: rgba(63,185,80,0.2);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    .protection-info h3 {
+      font-size: 13px; font-weight: 600; color: #3fb950;
+    }
+    .protection-info p {
+      font-size: 11px; color: #7d8590; margin-top: 2px;
+    }
+
+    .user-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 10px; padding: 12px 14px;
+      display: flex; align-items: center;
+      justify-content: space-between;
+    }
+    .user-left { display: flex; align-items: center; gap: 10px; }
+    .avatar {
+      width: 30px; height: 30px;
+      background: linear-gradient(135deg, #388bfd, #8957e5);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #fff;
+    }
+    .user-details .email {
+      font-size: 12px; color: #e6edf3; font-weight: 500;
+    }
+    .user-details .role {
+      font-size: 10px; color: #7d8590; margin-top: 1px;
+      text-transform: capitalize;
+    }
+    .badge-role {
+      background: rgba(56,139,253,0.15);
+      border: 1px solid rgba(56,139,253,0.3);
+      color: #388bfd; padding: 2px 8px;
+      border-radius: 20px; font-size: 10px; font-weight: 600;
+    }
+
+    .stats-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; padding: 10px 12px;
+      text-align: center;
+    }
+    .stat-number {
+      font-size: 20px; font-weight: 700;
+      background: linear-gradient(135deg, #388bfd, #8957e5);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stat-label {
+      font-size: 10px; color: #7d8590; margin-top: 2px;
+    }
+
+    .btn-logout {
+      width: 100%; padding: 8px;
+      background: transparent;
+      border: 1px solid #30363d;
+      border-radius: 8px; color: #7d8590;
+      font-size: 12px; cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .btn-logout:hover {
+      border-color: #f85149; color: #f85149;
+      background: rgba(248,81,73,0.05);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-in {
+      animation: fadeIn 0.3s ease forwards;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="container">
+
+    <div class="header animate-in">
+      <div class="shield-icon">🛡️</div>
+      <div class="brand">
+        <h1>SafeHos</h1>
+        <p>Антифишинговая защита</p>
+      </div>
+    </div>
+
+    <div id="status-bar" class="status-bar"></div>
 
     <div id="login-form">
-      <input type="email" id="email" placeholder="Email" class="input" autocomplete="email">
-      <input type="password" id="password" placeholder="Пароль" class="input" autocomplete="current-password">
-      <button class="btn-primary" id="login-btn" onclick="doLogin()">Войти</button>
+      <div class="input-group">
+        <span class="input-icon">✉️</span>
+        <input type="email" id="email" class="input" placeholder="Email адрес" autocomplete="email">
+      </div>
+      <div class="input-group">
+        <span class="input-icon">🔑</span>
+        <input type="password" id="password" class="input" placeholder="Пароль" autocomplete="current-password">
+      </div>
+      <button class="btn-login" id="login-btn">Войти в систему</button>
     </div>
 
-    <div id="logged-in" style="display:none">
-      <div class="user-info">
-        <span class="user-email" id="user-email"></span>
-        <span class="badge" id="user-role"></span>
+    <div id="logged-in">
+      <div class="protection-card animate-in">
+        <div class="pulse-ring">
+          <div class="pulse-dot">🛡️</div>
+        </div>
+        <div class="protection-info">
+          <h3>Защита активна</h3>
+          <p>Все сайты проверяются в реальном времени</p>
+        </div>
       </div>
-      <div class="protection-status">
-        <div class="status-dot active"></div>
-        <span>Защита активна</span>
+
+      <div class="user-card animate-in">
+        <div class="user-left">
+          <div class="avatar" id="avatar-letter">D</div>
+          <div class="user-details">
+            <div class="email" id="user-email">загрузка...</div>
+            <div class="role" id="user-role">dispatcher</div>
+          </div>
+        </div>
+        <div class="badge-role" id="role-badge">active</div>
       </div>
-      <button class="btn-secondary" onclick="doLogout()">Выйти</button>
+
+      <div class="stats-row animate-in">
+        <div class="stat-card">
+          <div class="stat-number" id="stat-checked">—</div>
+          <div class="stat-label">Проверено сегодня</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="stat-blocked">—</div>
+          <div class="stat-label">Заблокировано</div>
+        </div>
+      </div>
+
+      <button class="btn-logout" id="logout-btn">Выйти из аккаунта</button>
     </div>
+
   </div>
-
-  <script>
-    // Проверяем статус при открытии
-    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
-      if (response?.loggedIn) {
-        showLoggedIn();
-      }
-    });
-
-    async function doLogin() {
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value;
-      const btn = document.getElementById('login-btn');
-
-      if (!email || !password) {
-        showStatus('Введите email и пароль', 'error');
-        return;
-      }
-
-      btn.textContent = 'Входим...';
-      btn.disabled = true;
-
-      chrome.runtime.sendMessage(
-        { type: 'LOGIN', email, password },
-        (response) => {
-          btn.textContent = 'Войти';
-          btn.disabled = false;
-
-          if (response?.success) {
-            document.getElementById('user-email').textContent = response.user.email;
-            document.getElementById('user-role').textContent = response.user.role;
-            showLoggedIn();
-            showStatus('Вход выполнен успешно!', 'success');
-          } else {
-            showStatus(response?.error || 'Ошибка входа', 'error');
-          }
-        }
-      );
-    }
-
-    function doLogout() {
-      chrome.runtime.sendMessage({ type: 'LOGOUT' }, () => {
-        document.getElementById('logged-in').style.display = 'none';
-        document.getElementById('login-form').style.display = 'block';
-      });
-    }
-
-    function showLoggedIn() {
-      document.getElementById('login-form').style.display = 'none';
-      document.getElementById('logged-in').style.display = 'block';
-      chrome.storage.session.get('email', (data) => {
-        if (data.email) document.getElementById('user-email').textContent = data.email;
-      });
-      chrome.storage.session.get('role', (data) => {
-        if (data.role) document.getElementById('user-role').textContent = data.role;
-      });
-    }
-
-    function showStatus(msg, type) {
-      const bar = document.getElementById('status-bar');
-      bar.textContent = msg;
-      bar.className = `status-bar ${type}`;
-      bar.style.display = 'block';
-      setTimeout(() => bar.style.display = 'none', 3000);
-    }
-
-    // Enter для входа
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doLogin();
-    });
-  </script>
+  <script src="js/login.js"></script>
 </body>
 </html>

@@ -2,56 +2,177 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SafeHos — Проверка сайта</title>
-  <link rel="stylesheet" href="../styles/pages.css">
+  <title>SafeHos — Проверка</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0d1117; color: #e6edf3;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bg {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center top, rgba(56,139,253,0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .container {
+      max-width: 480px; width: 90%;
+      text-align: center; padding: 48px 32px;
+      position: relative; z-index: 1;
+    }
+    .spinner-wrap {
+      width: 88px; height: 88px;
+      margin: 0 auto 28px;
+      position: relative;
+    }
+    .spinner-outer {
+      width: 88px; height: 88px;
+      border: 3px solid #21262d;
+      border-top-color: #388bfd;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      position: absolute;
+    }
+    .spinner-inner {
+      width: 64px; height: 64px;
+      border: 3px solid #21262d;
+      border-bottom-color: #8957e5;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite reverse;
+      position: absolute;
+      top: 12px; left: 12px;
+    }
+    .spinner-icon {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 22px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 {
+      font-size: 24px; font-weight: 700;
+      color: #e6edf3; margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #7d8590; font-size: 14px;
+      margin-bottom: 24px; line-height: 1.6;
+    }
+    .domain-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #161b22; border: 1px solid #30363d;
+      padding: 8px 16px; border-radius: 8px;
+      font-family: monospace; font-size: 14px;
+      color: #e6edf3; margin-bottom: 24px;
+    }
+    .status-card {
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 12px; padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+    .status-row {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 10px;
+    }
+    .status-label { font-size: 12px; color: #7d8590; }
+    .status-value {
+      font-size: 12px; font-weight: 600;
+      color: #f0a84a;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #f0a84a;
+      animation: blink 1s ease infinite;
+    }
+    @keyframes blink {
+      0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+    .progress-bar {
+      height: 3px; background: #21262d;
+      border-radius: 2px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #388bfd, #8957e5);
+      border-radius: 2px;
+      animation: progress 3s ease-in-out infinite;
+    }
+    @keyframes progress {
+      0% { width: 10%; }
+      50% { width: 70%; }
+      100% { width: 10%; }
+    }
+    .info-card {
+      background: rgba(56,139,253,0.05);
+      border: 1px solid rgba(56,139,253,0.2);
+      border-radius: 10px; padding: 14px 16px;
+      font-size: 13px; color: #7d8590;
+      line-height: 1.6; margin-bottom: 20px;
+    }
+    .status-text {
+      font-size: 13px; color: #7d8590;
+      margin-top: 8px;
+    }
+    .btn-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 20px;
+      background: transparent; color: #7d8590;
+      border: 1px solid #30363d; border-radius: 8px;
+      font-size: 13px; cursor: pointer;
+      font-family: inherit; transition: all 0.2s;
+    }
+    .btn-back:hover { border-color: #388bfd; color: #388bfd; }
+    .safehos-badge {
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px; margin-top: 24px; font-size: 11px; color: #484f58;
+    }
+  </style>
 </head>
-<body class="waiting-page">
+<body>
+  <div class="bg"></div>
   <div class="container">
-    <div class="spinner"></div>
+    <div class="spinner-wrap">
+      <div class="spinner-outer"></div>
+      <div class="spinner-inner"></div>
+      <div class="spinner-icon">🔍</div>
+    </div>
+
     <h1>Проверяем сайт</h1>
-    <div class="domain-badge" id="domain">загрузка...</div>
-    <p class="subtitle">Этот сайт выглядит подозрительно. Модератор проверяет его прямо сейчас.</p>
+    <p class="subtitle">Модератор безопасности проверяет этот сайт прямо сейчас</p>
 
-    <div class="status-box">
-      <div class="status-dot"></div>
-      <span id="status-text">Ожидаем решения модератора...</span>
+    <div class="domain-badge">
+      <span>⚠️</span>
+      <span id="domain">загрузка...</span>
     </div>
 
-    <div class="info-box">
-      <p>Это займёт несколько секунд. Страница откроется автоматически после проверки.</p>
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Статус проверки</span>
+        <span class="status-value">
+          <span class="dot"></span>
+          На рассмотрении
+        </span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill"></div>
+      </div>
+      <p class="status-text" id="status-text">Ожидаем решения модератора...</p>
     </div>
 
-    <button class="btn-back" onclick="history.back()">← Вернуться назад</button>
+    <div class="info-card">
+      🕐 Обычно это занимает менее 30 секунд.<br>
+      Страница откроется автоматически после проверки.
+    </div>
+
+    <button class="btn-back" onclick="goBack()">← Вернуться назад</button>
+
+    <div class="safehos-badge">
+      <span>🛡️</span>
+      <span>Защищено SafeHos</span>
+    </div>
   </div>
-
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const domain = params.get('domain') || 'Неизвестный домен';
-    const eventId = params.get('eventId');
-
-    document.getElementById('domain').textContent = domain;
-
-    // Опрашиваем background каждые 2 секунды
-    let checkCount = 0;
-    const checker = setInterval(() => {
-      checkCount++;
-      if (checkCount > 60) { // 2 минуты максимум
-        clearInterval(checker);
-        document.getElementById('status-text').textContent = 'Время ожидания истекло. Обратитесь к модератору.';
-        return;
-      }
-
-      chrome.runtime.sendMessage(
-        { type: 'CHECK_DECISION', eventId },
-        (response) => {
-          if (!response?.waiting) {
-            // Решение принято — background уже обработал редирект
-            clearInterval(checker);
-          }
-        }
-      );
-    }, 2000);
-  </script>
+  <script src="js/waiting.js"></script>
 </body>
 </html>
