@@ -4,104 +4,230 @@
   <meta charset="UTF-8">
   <title>SafeHos — Заблокировано</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Inter', sans-serif;
-      background: #0d1117; color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: #0d0608;
+      color: #e6edf3;
       min-height: 100vh;
-      display: flex; align-items: center; justify-content: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
     }
-    .bg {
-      position: fixed; inset: 0;
-      background: radial-gradient(ellipse at center top, rgba(248,81,73,0.08) 0%, transparent 60%);
+
+    /* Анимированный фон */
+    .bg-particles {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
       pointer-events: none;
     }
-    .container {
-      max-width: 480px; width: 90%;
-      text-align: center; padding: 48px 32px;
-      position: relative; z-index: 1;
-    }
-    .icon-wrap {
-      width: 88px; height: 88px;
-      background: rgba(248,81,73,0.1);
-      border: 2px solid rgba(248,81,73,0.3);
+    .particle {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      background: rgba(248, 81, 73, 0.4);
       border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 40px; margin: 0 auto 28px;
-      animation: shake 0.5s ease 0.3s;
+      animation: float linear infinite;
+    }
+    @keyframes float {
+      0% { transform: translateY(100vh) translateX(0); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(-100px) translateX(100px); opacity: 0; }
+    }
+
+    .bg-glow {
+      position: fixed;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 800px; height: 800px;
+      background: radial-gradient(circle, rgba(248,81,73,0.12) 0%, transparent 60%);
+      pointer-events: none;
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 0.8; transform: translateX(-50%) scale(1); }
+      50% { opacity: 1; transform: translateX(-50%) scale(1.1); }
+    }
+
+    .container {
+      text-align: center;
+      padding: 48px 32px;
+      max-width: 520px;
+      width: 90%;
+      position: relative;
+      z-index: 1;
+      animation: fadeInUp 0.6s ease forwards;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Иконка с анимацией */
+    .icon-container {
+      position: relative;
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 32px;
+    }
+    .icon-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(248,81,73,0.3);
+      animation: ring-expand 2s ease-out infinite;
+    }
+    .icon-ring:nth-child(2) { animation-delay: 0.5s; }
+    .icon-ring:nth-child(3) { animation-delay: 1s; }
+    @keyframes ring-expand {
+      0% { transform: scale(0.8); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    .icon-inner {
+      position: absolute;
+      inset: 10px;
+      background: radial-gradient(135deg, rgba(248,81,73,0.15), rgba(248,81,73,0.05));
+      border: 2px solid rgba(248,81,73,0.5);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 44px;
+      animation: shake 0.5s ease 0.8s;
     }
     @keyframes shake {
       0%,100% { transform: translateX(0); }
-      20% { transform: translateX(-6px); }
-      40% { transform: translateX(6px); }
-      60% { transform: translateX(-4px); }
-      80% { transform: translateX(4px); }
+      20% { transform: translateX(-8px) rotate(-5deg); }
+      40% { transform: translateX(8px) rotate(5deg); }
+      60% { transform: translateX(-5px) rotate(-3deg); }
+      80% { transform: translateX(5px) rotate(3deg); }
     }
+
     h1 {
-      font-size: 28px; font-weight: 700;
-      color: #f85149; margin-bottom: 12px;
+      font-size: 32px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #f85149, #ff6b6b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
     }
+
     .domain-badge {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: #161b22; border: 1px solid #30363d;
-      padding: 8px 16px; border-radius: 8px;
-      font-family: monospace; font-size: 15px;
-      color: #e6edf3; margin: 16px 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(248,81,73,0.08);
+      border: 1px solid rgba(248,81,73,0.25);
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-family: monospace;
+      font-size: 16px;
+      color: #ff9999;
+      margin: 16px 0;
+      animation: fadeIn 0.4s ease 0.3s both;
     }
+
     .reason-text {
-      color: #7d8590; font-size: 14px;
-      margin-bottom: 28px; line-height: 1.6;
+      color: #7d8590;
+      font-size: 14px;
+      margin-bottom: 28px;
+      animation: fadeIn 0.4s ease 0.4s both;
     }
+
     .info-card {
-      background: #161b22; border: 1px solid #30363d;
-      border-radius: 12px; padding: 20px;
-      margin-bottom: 24px; text-align: left;
+      background: rgba(248,81,73,0.05);
+      border: 1px solid rgba(248,81,73,0.15);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 24px;
+      text-align: left;
+      animation: fadeIn 0.4s ease 0.5s both;
     }
     .info-card h3 {
-      font-size: 13px; font-weight: 600;
-      color: #f85149; margin-bottom: 10px;
-      display: flex; align-items: center; gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #f85149;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .info-card p {
-      font-size: 13px; color: #7d8590; line-height: 1.6;
+      font-size: 13px;
+      color: #7d8590;
+      line-height: 1.6;
     }
     .contact-row {
-      display: flex; align-items: center; gap: 8px;
-      background: #0d1117; border: 1px solid #30363d;
-      border-radius: 8px; padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
       margin-top: 12px;
     }
     .contact-row a {
-      color: #388bfd; text-decoration: none; font-size: 13px;
+      color: #388bfd;
+      text-decoration: none;
+      font-size: 13px;
     }
+
     .btn-back {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 10px 20px;
-      background: transparent; color: #7d8590;
-      border: 1px solid #30363d; border-radius: 8px;
-      font-size: 13px; cursor: pointer;
-      font-family: inherit; transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: transparent;
+      color: #7d8590;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+      animation: fadeIn 0.4s ease 0.6s both;
     }
     .btn-back:hover {
-      border-color: #388bfd; color: #388bfd;
+      border-color: #388bfd;
+      color: #388bfd;
+      background: rgba(56,139,253,0.05);
     }
+
     .safehos-badge {
-      display: flex; align-items: center; justify-content: center;
-      gap: 6px; margin-top: 24px;
-      font-size: 11px; color: #484f58;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 28px;
+      font-size: 11px;
+      color: #30363d;
+      animation: fadeIn 0.4s ease 0.7s both;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
   </style>
 </head>
 <body>
-  <div class="bg"></div>
+  <div class="bg-particles" id="particles"></div>
+  <div class="bg-glow"></div>
+
   <div class="container">
-    <div class="icon-wrap">🚫</div>
-    <h1>Сайт заблокирован</h1>
-    <div class="domain-badge">
-      <span>⚠️</span>
-      <span id="domain">загрузка...</span>
+    <div class="icon-container">
+      <div class="icon-ring"></div>
+      <div class="icon-ring"></div>
+      <div class="icon-ring"></div>
+      <div class="icon-inner">🚫</div>
     </div>
+
+    <h1>Сайт заблокирован</h1>
+    <div class="domain-badge"><span>⚠️</span><span id="domain">загрузка...</span></div>
     <p class="reason-text" id="reason">Этот сайт определён как опасный</p>
 
     <div class="info-card">
@@ -113,13 +239,13 @@
       </div>
     </div>
 
-    <button class="btn-back" onclick="goBack()">← Вернуться назад</button>
+    <button class="btn-back" id="back-btn">← Вернуться назад</button>
 
     <div class="safehos-badge">
-      <span>🛡️</span>
-      <span>Защищено SafeHos</span>
+      <span>🛡️</span><span>Защищено SafeHos Security Platform</span>
     </div>
   </div>
+
   <script src="js/blocked.js"></script>
 </body>
 </html>

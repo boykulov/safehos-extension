@@ -1,319 +1,405 @@
-// ============================================================
-// SafeHos Extension - Background Service Worker
-// Этот скрипт работает постоянно в фоне
-// ============================================================
-
 const API_BASE = 'https://api.safehos.com/api/v1';
 
-// Локальный кэш решений (чтобы не спрашивать сервер каждый раз)
-// domain → { decision, timestamp }
-const domainCache = new Map();
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 часа
+// Локальный кэш — только для производительности
+// Сервер всегда является источником истины
+const domainCache = new Map();    // domain → { decision, timestamp, eventId }
+const CACHE_TTL = 30 * 60 * 1000; // 30 минут (было 24ч — уменьшаем для Default Deny)
 
-// Ожидающие решения: tabId → { domain, url, resolve }
-const pendingTabs = new Map();
-
-// Домены которые сейчас проверяются (чтобы не дублировать запросы)
+const pendingTabs = new Map();    // eventId → { tabId, domain, url, startTime, autoBlocked }
+const blockedTabs = new Map();    // domain → [{ tabId, originalUrl }]
+const resolvedDecisions = new Map(); // eventId → { decision, originalUrl }
 const checkingDomains = new Set();
 
-// ============================================================
-// БЕЛЫЙ СПИСОК — эти домены никогда не проверяем
-// ============================================================
-const WHITELIST = new Set([
-  'google.com', 'gmail.com', 'microsoft.com', 'office.com',
-  'outlook.com', 'openai.com', 'chatgpt.com', 'github.com',
-  'stackoverflow.com', 'apple.com', 'linkedin.com', 'zoom.us',
-  'slack.com', 'notion.so', 'amazon.com', 'cloudflare.com',
-  'newtab', 'extensions', 'chrome',
+// Минимальный список — только служебные URL которые никогда не проверяем
+// Все остальные домены идут на проверку к серверу
+const SKIP_URLS = new Set([
+  'safehos.com',
 ]);
 
-// ============================================================
-// ИНИЦИАЛИЗАЦИЯ
-// ============================================================
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('SafeHos Extension установлен');
-  loadCacheFromStorage();
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  loadCacheFromStorage();
-  connectWebSocket();
-});
-
-// ============================================================
-// ПЕРЕХВАТ НАВИГАЦИИ
-// Срабатывает когда пользователь переходит на новый сайт
-// ============================================================
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  // Только главная вкладка (не iframe, не popup)
-  if (details.frameId !== 0) return;
-
-  const url = details.url;
-  const tabId = details.tabId;
-
-  // Пропускаем служебные страницы
-  if (url.startsWith('chrome://') ||
-      url.startsWith('chrome-extension://') ||
-      url.startsWith('about:') ||
-      url.startsWith('data:') ||
-      url === 'about:blank') {
-    return;
+function shouldSkip(domain) {
+  if (!domain) return true;
+  for (const skip of SKIP_URLS) {
+    if (domain === skip || domain.endsWith('.' + skip)) return true;
   }
+  return false;
+}
+
+chrome.runtime.onInstalled.addListener(() => loadCacheFromStorage());
+chrome.runtime.onStartup.addListener(() => loadCacheFromStorage());
+
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+  if (details.frameId !== 0) return;
+  await handleNavigation(details.url, details.tabId);
+});
+
+chrome.webNavigation.onCommitted.addListener(async (details) => {
+  if (details.frameId !== 0) return;
+  if (details.transitionType === 'auto_subframe') return;
+  await handleNavigation(details.url, details.tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  for (const [domain, tabs] of blockedTabs.entries()) {
+    const filtered = tabs.filter(t => t.tabId !== tabId);
+    if (filtered.length === 0) blockedTabs.delete(domain);
+    else blockedTabs.set(domain, filtered);
+  }
+});
+
+async function handleNavigation(url, tabId) {
+  if (!url) return;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') ||
+      url.startsWith('about:') || url.startsWith('data:') || url.startsWith('file:')) return;
 
   const domain = extractDomain(url);
-  if (!domain) return;
+  if (!domain || shouldSkip(domain)) return;
 
-  // Пропускаем белый список
-  if (WHITELIST.has(domain)) return;
-
-  // Пропускаем safehos.com (наш сайт)
-  if (domain.includes('safehos.com')) return;
-
-  // Проверяем локальный кэш
+  // Проверяем кэш
   const cached = getCachedDecision(domain);
   if (cached) {
-    if (cached.decision === 'blocked') {
-      blockTab(tabId, domain, cached.reason || 'Домен заблокирован');
+    if (cached.decision === 'blocked' || cached.decision === 'pending') {
+      // pending тоже блокируем — Default Deny
+      blockTab(tabId, domain, cached.reason || 'Домен не одобрён', url);
     }
-    // trusted или approved — пропускаем
+    // trusted/approved → пропускаем
     return;
   }
 
-  // Отправляем на проверку серверу
   await checkDomain(url, domain, tabId);
-});
+}
 
-// ============================================================
-// ПРОВЕРКА ДОМЕНА ЧЕРЕЗ API
-// ============================================================
 async function checkDomain(url, domain, tabId) {
-  // Если уже проверяется — не дублируем
   if (checkingDomains.has(domain)) return;
   checkingDomains.add(domain);
 
   try {
     const token = await getToken();
-    if (!token) {
-      // Не авторизован — показываем страницу логина
-      checkingDomains.delete(domain);
-      return;
-    }
+    if (!token) { checkingDomains.delete(domain); return; }
 
-    const response = await fetch(`${API_BASE}/domain/check`, {
+    const res = await fetch(`${API_BASE}/domain/check`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        url: url,
-        tabId: String(tabId),
-      }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ url, tabId: String(tabId) }),
     });
 
-    if (response.status === 401) {
-      // Токен истёк — очищаем
+    if (res.status === 401) {
       await chrome.storage.session.remove('token');
       checkingDomains.delete(domain);
       return;
     }
 
-    const result = await response.json();
+    const result = await res.json();
     checkingDomains.delete(domain);
 
-    // Сохраняем в кэш
-    cacheDecision(domain, result.decision, result.message);
+    handleCheckResult(result, tabId, url, domain);
 
-    if (result.decision === 'dangerous' || result.decision === 'blocked') {
-      blockTab(tabId, domain, result.message);
-
-    } else if (result.decision === 'suspicious') {
-      // Показываем страницу ожидания
-      showWaitingPage(tabId, domain, result.eventId);
-      // Сохраняем pending
-      pendingTabs.set(result.eventId, { tabId, domain, url });
-
-    }
-    // trusted или approved — ничего не делаем, сайт открывается
-
-  } catch (error) {
-    console.error('Ошибка проверки домена:', error);
+  } catch (e) {
+    console.error('checkDomain error:', e);
     checkingDomains.delete(domain);
+    // При ошибке сети — НЕ блокируем (сервер недоступен)
+    // Fail Open для network errors, чтобы не мешать работе при проблемах с API
+    // Но очищаем кэш чтобы при следующем открытии перепроверить
+    domainCache.delete(domain);
   }
 }
 
-// ============================================================
-// БЛОКИРОВКА ВКЛАДКИ
-// ============================================================
-function blockTab(tabId, domain, reason) {
-  const blockedUrl = chrome.runtime.getURL('pages/blocked.html') +
-    `?domain=${encodeURIComponent(domain)}&reason=${encodeURIComponent(reason || 'Фишинговый сайт')}`;
+function handleCheckResult(result, tabId, url, domain) {
+  const { decision, eventId, message, riskScore, flags, category } = result;
 
+  if (decision === 'trusted' || decision === 'approved') {
+    // Домен в allowlist → открываем
+    cacheDecision(domain, 'trusted', 'Разрешено', null, CACHE_TTL);
+    return;
+  }
+
+  if (decision === 'blocked') {
+    // Домен в blocklist → блокируем навсегда
+    cacheDecision(domain, 'blocked', message || 'Заблокировано', null, CACHE_TTL);
+    blockTab(tabId, domain, message || 'Заблокировано', url);
+    return;
+  }
+
+  if (decision === 'pending') {
+    // DEFAULT DENY — домен неизвестен
+    // Блокируем И добавляем в pendingTabs для ожидания решения модератора
+    cacheDecision(domain, 'pending', message || 'Не одобрен', eventId, CACHE_TTL);
+
+    if (eventId) {
+      pendingTabs.set(eventId, {
+        tabId, domain, url,
+        startTime: Date.now(),
+        autoBlocked: true,
+        riskScore: riskScore || 0,
+        flags: flags || [],
+      });
+    }
+
+    // Показываем страницу блокировки с пометкой "Not approved yet"
+    blockTab(tabId, domain, message || 'Домен не в списке разрешённых', url, 'pending');
+    return;
+  }
+
+  if (decision === 'dangerous') {
+    // GSB или критический риск
+    cacheDecision(domain, 'blocked', message, eventId, CACHE_TTL);
+    blockTab(tabId, domain, message || 'Опасный сайт', url, 'dangerous');
+
+    if (eventId) {
+      pendingTabs.set(eventId, {
+        tabId, domain, url,
+        startTime: Date.now(),
+        autoBlocked: true,
+      });
+    }
+  }
+}
+
+function blockTab(tabId, domain, reason, originalUrl, type = 'blocked') {
+  // Запоминаем оригинальный URL для возможной разблокировки
+  if (originalUrl && !originalUrl.includes('chrome-extension://')) {
+    if (!blockedTabs.has(domain)) blockedTabs.set(domain, []);
+    const existing = blockedTabs.get(domain);
+    if (!existing.find(t => t.tabId === tabId)) {
+      existing.push({ tabId, originalUrl });
+    }
+  }
+
+  const blockedUrl = chrome.runtime.getURL('pages/blocked.html') +
+    `?domain=${encodeURIComponent(domain)}&reason=${encodeURIComponent(reason || 'Заблокировано')}&type=${type}`;
   chrome.tabs.update(tabId, { url: blockedUrl });
 
   // Уведомление
-  chrome.notifications.create({
-    type: 'basic',
-    iconUrl: 'icons/icon48.png',
-    title: '🚫 SafeHos заблокировал сайт',
-    message: `Опасный домен: ${domain}`,
+  chrome.notifications.create(`block_${Date.now()}`, {
+    type: 'basic', iconUrl: 'icons/icon48.png',
+    title: type === 'pending' ? '⏳ SafeHos — Сайт не одобрён' : '🚫 SafeHos — Сайт заблокирован',
+    message: domain,
   });
 }
 
-// ============================================================
-// СТРАНИЦА ОЖИДАНИЯ
-// ============================================================
-function showWaitingPage(tabId, domain, eventId) {
-  const waitingUrl = chrome.runtime.getURL('pages/waiting.html') +
-    `?domain=${encodeURIComponent(domain)}&eventId=${encodeURIComponent(eventId)}`;
-
-  chrome.tabs.update(tabId, { url: waitingUrl });
+function showApprovedPage(tabId, domain, originalUrl, responseTime) {
+  const url = chrome.runtime.getURL('pages/approved.html') +
+    `?domain=${encodeURIComponent(domain)}&url=${encodeURIComponent(originalUrl)}&time=${responseTime || 0}`;
+  chrome.tabs.update(tabId, { url });
+  chrome.notifications.create(`approved_${Date.now()}`, {
+    type: 'basic', iconUrl: 'icons/icon48.png',
+    title: '✅ SafeHos — Доступ разрешён',
+    message: `Модератор одобрил: ${domain}`,
+  });
 }
 
-// ============================================================
-// WEBSOCKET — получаем решения модератора в реальном времени
-// ============================================================
-let ws = null;
-let wsReconnectTimer = null;
+async function approveAllTabsWithDomain(domain) {
+  // Обновляем кэш — убираем pending/blocked
+  cacheDecision(domain, 'trusted', 'Одобрено модератором', null, CACHE_TTL);
 
-async function connectWebSocket() {
-  const token = await getToken();
-  if (!token) return;
-
-  const userData = await chrome.storage.session.get(['userId', 'role', 'companyId']);
-  if (!userData.userId) return;
-
-  if (ws) {
-    ws.close();
-    ws = null;
+  const blocked = blockedTabs.get(domain);
+  if (blocked && blocked.length > 0) {
+    for (const { tabId, originalUrl } of blocked) {
+      try {
+        await chrome.tabs.get(tabId);
+        showApprovedPage(tabId, domain, originalUrl, null);
+      } catch(e) {}
+    }
+    blockedTabs.delete(domain);
+    return;
   }
 
+  // Ищем вкладки на blocked.html с этим доменом
   try {
-    // Используем socket.io через fetch (простой polling для MV3)
-    // Polling каждые 3 секунды для pending решений
-    startPolling(token, userData);
-  } catch (error) {
-    console.error('WebSocket ошибка:', error);
-  }
+    const tabs = await chrome.tabs.query({});
+    let found = false;
+    for (const tab of tabs) {
+      if (tab.url && tab.url.includes('pages/blocked.html') &&
+          tab.url.includes(encodeURIComponent(domain))) {
+        showApprovedPage(tab.id, domain, `https://${domain}`, null);
+        found = true;
+      }
+    }
+    if (!found) {
+      chrome.notifications.create(`approved_${Date.now()}`, {
+        type: 'basic', iconUrl: 'icons/icon48.png',
+        title: '✅ SafeHos — Доступ разрешён',
+        message: `Модератор одобрил: ${domain}`,
+      });
+    }
+  } catch(e) {}
 }
 
-// Polling — проверяем есть ли решения для ожидающих вкладок
+async function blockAllTabsWithDomain(domain) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab.url) continue;
+      const tabDomain = extractDomain(tab.url);
+      if (tabDomain === domain && !tab.url.startsWith('chrome-extension://')) {
+        blockTab(tab.id, domain, 'Заблокировано модератором', tab.url);
+      }
+    }
+  } catch(e) {}
+}
+
+// ============================================================
+// POLLING — каждые 2 сек для pending событий
+// ============================================================
 let pollingInterval = null;
 
-async function startPolling(token, userData) {
+async function startPolling(token) {
   if (pollingInterval) clearInterval(pollingInterval);
-
   pollingInterval = setInterval(async () => {
     if (pendingTabs.size === 0) return;
 
-    try {
-      const response = await fetch(`${API_BASE}/domain/pending`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+    for (const [eventId, tabInfo] of pendingTabs.entries()) {
+      if (eventId.startsWith('tmp_')) continue;
+      try {
+        const res = await fetch(`${API_BASE}/decision/status/${eventId}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        const status = await res.json();
+        if (!status.resolved || status.decision === 'pending') continue;
 
-      if (!response.ok) return;
+        pendingTabs.delete(eventId);
+        const responseTime = Math.floor((Date.now() - tabInfo.startTime) / 1000);
 
-      const pending = await response.json();
-
-      // Проверяем решения для наших ожидающих вкладок
-      for (const [eventId, tabInfo] of pendingTabs.entries()) {
-        const serverEvent = pending.find(e => e.id === eventId);
-
-        if (!serverEvent) {
-          // Событие исчезло из pending — значит решение принято
-          pendingTabs.delete(eventId);
-          continue;
+        if (status.decision === 'approved') {
+          cacheDecision(tabInfo.domain, 'trusted', 'Одобрено', null, CACHE_TTL);
+          resolvedDecisions.set(eventId, { decision: 'approved', originalUrl: tabInfo.url });
+          await approveAllTabsWithDomain(tabInfo.domain);
+        } else {
+          cacheDecision(tabInfo.domain, 'blocked', 'Заблокировано', null, CACHE_TTL);
+          resolvedDecisions.set(eventId, { decision: 'blocked', originalUrl: tabInfo.url });
+          // Уже на blocked странице — просто обновляем сообщение
+          chrome.notifications.create(`blocked_mod_${Date.now()}`, {
+            type: 'basic', iconUrl: 'icons/icon48.png',
+            title: '🚫 SafeHos — Заблокировано модератором',
+            message: tabInfo.domain,
+          });
         }
-
-        if (serverEvent.decision !== 'pending') {
-          pendingTabs.delete(eventId);
-
-          if (serverEvent.decision === 'approved') {
-            // Открываем оригинальный URL
-            chrome.tabs.update(tabInfo.tabId, { url: tabInfo.url });
-            cacheDecision(tabInfo.domain, 'approved', 'Одобрено модератором');
-          } else {
-            blockTab(tabInfo.tabId, tabInfo.domain, 'Заблокировано модератором');
-            cacheDecision(tabInfo.domain, 'blocked', 'Заблокировано модератором');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Polling error:', error);
+      } catch(e) {}
     }
-  }, 3000); // каждые 3 секунды
+  }, 2000);
 }
 
 // ============================================================
-// СООБЩЕНИЯ ОТ СТРАНИЦ (blocked.html, waiting.html, login.html)
+// SYNC — каждые 10 сек синхронизирует кэш с сервером
+// ============================================================
+let syncInterval = null;
+let lastSyncTime = 0;
+
+async function startSync(token) {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/domain/decisions/sync`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const serverDecisions = await res.json();
+
+      // Собираем домены которые есть на сервере
+      const serverDomains = new Set(serverDecisions.map(d => d.domain));
+
+      for (const dec of serverDecisions) {
+        const cached = domainCache.get(dec.domain);
+        const serverTime = new Date(dec.updatedAt).getTime();
+
+        if (!cached || serverTime > cached.timestamp) {
+          const oldDecision = cached?.decision;
+          const newDecision = dec.decision === 'approved' ? 'trusted' : 'blocked';
+          cacheDecision(dec.domain, newDecision, 'Синхронизировано', null, CACHE_TTL);
+
+          if (newDecision === 'blocked' && oldDecision !== 'blocked') {
+            // Домен стал заблокированным → блокируем все вкладки
+            blockAllTabsWithDomain(dec.domain);
+          } else if (newDecision === 'trusted' && oldDecision === 'blocked') {
+            // Домен разблокирован → открываем заблокированные вкладки
+            approveAllTabsWithDomain(dec.domain);
+          }
+        }
+      }
+
+      // Проверяем домены в кэше которых больше нет на сервере
+      // Это значит их удалили из allowlist/blocklist → нужно сбросить кэш
+      if (lastSyncTime > 0) {
+        for (const [domain, cached] of domainCache.entries()) {
+          // Пропускаем служебные записи
+          if (cached.decision === 'pending' && !serverDomains.has(domain)) {
+            // Pending домен исчез с сервера — возможно одобрен/заблокирован
+            // Не трогаем — polling сам обработает через eventId
+            continue;
+          }
+          if ((cached.decision === 'trusted' || cached.decision === 'blocked') &&
+              !serverDomains.has(domain)) {
+            // Домен удалён из списков → сбрасываем кэш
+            // При следующем открытии extension заново спросит сервер
+            console.log(`Cache cleared for removed domain: ${domain} (was: ${cached.decision})`);
+            domainCache.delete(domain);
+          }
+        }
+        saveCacheToStorage();
+      }
+
+      lastSyncTime = Date.now();
+    } catch(e) {}
+  }, 10000);
+}
+
+// ============================================================
+// MESSAGES
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-
   if (message.type === 'LOGIN') {
     handleLogin(message.email, message.password)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true; // важно для async
-  }
-
-  if (message.type === 'GET_STATUS') {
-    getToken().then(token => {
-      sendResponse({ loggedIn: !!token });
-    });
+      .then(r => sendResponse(r))
+      .catch(e => sendResponse({ success: false, error: e.message }));
     return true;
   }
-
+  if (message.type === 'GET_STATUS') {
+    getToken().then(token => sendResponse({ loggedIn: !!token }));
+    return true;
+  }
   if (message.type === 'LOGOUT') {
     chrome.storage.session.clear();
+    domainCache.clear();
+    chrome.storage.local.remove('domainCache');
+    if (pollingInterval) clearInterval(pollingInterval);
+    if (syncInterval) clearInterval(syncInterval);
     sendResponse({ success: true });
   }
-
-  if (message.type === 'CHECK_DECISION') {
-    // waiting.html спрашивает — есть ли уже решение?
-    const eventId = message.eventId;
-    const pending = pendingTabs.get(eventId);
-    sendResponse({ waiting: !!pending });
+  if (message.type === 'GET_DECISION') {
+    const dec = resolvedDecisions.get(message.eventId);
+    if (dec) { sendResponse(dec); }
+    else {
+      const cached = domainCache.get(message.domain);
+      sendResponse(cached && cached.decision !== 'pending'
+        ? { decision: cached.decision === 'trusted' ? 'approved' : cached.decision, originalUrl: null }
+        : { decision: null });
+    }
+  }
+  if (message.type === 'CLEAR_DOMAIN_CACHE') {
+    if (message.domain) domainCache.delete(message.domain);
+    else domainCache.clear();
+    saveCacheToStorage();
+    sendResponse({ success: true });
   }
 });
 
-// ============================================================
-// АВТОРИЗАЦИЯ
-// ============================================================
 async function handleLogin(email, password) {
-  const response = await fetch(`${API_BASE}/auth/login`, {
+  const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.message || 'Ошибка входа');
-  }
-
-  // Сохраняем токен и данные пользователя
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Ошибка входа');
   await chrome.storage.session.set({
-    token: data.access_token,
-    userId: data.user.id,
-    role: data.user.role,
-    companyId: data.user.companyId,
-    email: data.user.email,
+    token: data.access_token, userId: data.user.id,
+    role: data.user.role, companyId: data.user.companyId, email: data.user.email,
   });
-
-  // Запускаем polling
-  startPolling(data.access_token, {
-    userId: data.user.id,
-    role: data.user.role,
-    companyId: data.user.companyId,
-  });
-
+  startPolling(data.access_token);
+  startSync(data.access_token);
   return { success: true, user: data.user };
 }
 
-// ============================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ============================================================
 async function getToken() {
   const data = await chrome.storage.session.get('token');
   return data.token || null;
@@ -321,56 +407,47 @@ async function getToken() {
 
 function extractDomain(url) {
   try {
-    const parsed = new URL(url);
-    let hostname = parsed.hostname;
-    if (hostname.startsWith('www.')) hostname = hostname.slice(4);
-    return hostname;
+    let h = new URL(url).hostname;
+    if (h.startsWith('www.')) h = h.slice(4);
+    return h.toLowerCase();
   } catch { return null; }
 }
 
-function cacheDecision(domain, decision, reason) {
-  domainCache.set(domain, {
-    decision,
-    reason,
-    timestamp: Date.now(),
-  });
-  // Сохраняем в chrome.storage чтобы кэш выжил при перезапуске SW
+function cacheDecision(domain, decision, reason, eventId, ttl) {
+  domainCache.set(domain, { decision, reason, eventId, timestamp: Date.now(), ttl: ttl || CACHE_TTL });
   saveCacheToStorage();
 }
 
 function getCachedDecision(domain) {
-  const cached = domainCache.get(domain);
-  if (!cached) return null;
-  if (Date.now() - cached.timestamp > CACHE_TTL) {
-    domainCache.delete(domain);
-    return null;
-  }
-  return cached;
+  const c = domainCache.get(domain);
+  if (!c) return null;
+  const ttl = c.ttl || CACHE_TTL;
+  if (Date.now() - c.timestamp > ttl) { domainCache.delete(domain); return null; }
+  return c;
 }
 
 async function saveCacheToStorage() {
-  const cacheObj = {};
-  for (const [key, value] of domainCache.entries()) {
-    cacheObj[key] = value;
-  }
-  await chrome.storage.local.set({ domainCache: cacheObj });
+  const obj = {};
+  for (const [k, v] of domainCache.entries()) obj[k] = v;
+  await chrome.storage.local.set({ domainCache: obj });
 }
 
 async function loadCacheFromStorage() {
   const data = await chrome.storage.local.get('domainCache');
   if (data.domainCache) {
     for (const [domain, value] of Object.entries(data.domainCache)) {
-      if (Date.now() - value.timestamp < CACHE_TTL) {
+      const ttl = value.ttl || CACHE_TTL;
+      if (Date.now() - value.timestamp < ttl) {
         domainCache.set(domain, value);
       }
     }
   }
+  const tokenData = await chrome.storage.session.get('token');
+  if (tokenData.token) {
+    startPolling(tokenData.token);
+    startSync(tokenData.token);
+  }
 }
 
-// Keepalive для Service Worker (MV3 убивает SW через 30 сек)
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') {
-    // просто держим SW живым
-  }
-});
+chrome.alarms.onAlarm.addListener(() => {});
