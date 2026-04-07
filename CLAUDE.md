@@ -1,3 +1,5 @@
+# Язык общения: всегда отвечай на русском языке
+
 # SafeHos — Claude Code Context
 
 ## Что такое SafeHos
