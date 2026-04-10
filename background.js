@@ -24,8 +24,16 @@ function shouldSkip(domain) {
   return false;
 }
 
-chrome.runtime.onInstalled.addListener(() => loadCacheFromStorage());
-chrome.runtime.onStartup.addListener(() => loadCacheFromStorage());
+chrome.runtime.onInstalled.addListener(async () => {
+  await loadCacheFromStorage();
+  // Автоидентификация при установке
+  try { await handleAutoIdentify(); } catch(e) { console.log('Auto-identify on install:', e.message); }
+});
+chrome.runtime.onStartup.addListener(async () => {
+  await loadCacheFromStorage();
+  // Автоидентификация при запуске Chrome
+  try { await handleAutoIdentify(); } catch(e) { console.log('Auto-identify on startup:', e.message); }
+});
 
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return;
@@ -57,8 +65,10 @@ async function handleNavigation(url, tabId) {
   // Проверяем кэш
   const cached = getCachedDecision(domain);
   if (cached) {
-    if (cached.decision === 'blocked' || cached.decision === 'pending') {
-      // pending тоже блокируем — Default Deny
+    if (cached.decision === 'pending') {
+      // Pending — показываем waiting page, не blocked
+      showWaitingPage(tabId, domain, url, cached.eventId);
+    } else if (cached.decision === 'blocked') {
       blockTab(tabId, domain, cached.reason || 'Домен не одобрён', url);
     }
     // trusted/approved → пропускаем
@@ -73,8 +83,13 @@ async function checkDomain(url, domain, tabId) {
   checkingDomains.add(domain);
 
   try {
-    const token = await getToken();
-    if (!token) { checkingDomains.delete(domain); return; }
+    let token = await getToken();
+    if (!token) {
+      // Попытка авто-идентификации если токена нет
+      try { await handleAutoIdentify(); } catch(e) {}
+      token = await getToken();
+      if (!token) { checkingDomains.delete(domain); return; }
+    }
 
     const res = await fetch(`${API_BASE}/domain/check`, {
       method: 'POST',
@@ -121,7 +136,7 @@ function handleCheckResult(result, tabId, url, domain) {
 
   if (decision === 'pending') {
     // DEFAULT DENY — домен неизвестен
-    // Блокируем И добавляем в pendingTabs для ожидания решения модератора
+    // Показываем waiting page и ждём решения модератора
     cacheDecision(domain, 'pending', message || 'Не одобрен', eventId, CACHE_TTL);
 
     if (eventId) {
@@ -134,8 +149,8 @@ function handleCheckResult(result, tabId, url, domain) {
       });
     }
 
-    // Показываем страницу блокировки с пометкой "Not approved yet"
-    blockTab(tabId, domain, message || 'Домен не в списке разрешённых', url, 'pending');
+    // Показываем waiting page — НЕ blocked
+    showWaitingPage(tabId, domain, url, eventId);
     return;
   }
 
@@ -176,6 +191,27 @@ function blockTab(tabId, domain, reason, originalUrl, type = 'blocked') {
   });
 }
 
+function showWaitingPage(tabId, domain, originalUrl, eventId) {
+  // Запоминаем оригинальный URL для возможной разблокировки
+  if (originalUrl && !originalUrl.includes('chrome-extension://')) {
+    if (!blockedTabs.has(domain)) blockedTabs.set(domain, []);
+    const existing = blockedTabs.get(domain);
+    if (!existing.find(t => t.tabId === tabId)) {
+      existing.push({ tabId, originalUrl });
+    }
+  }
+
+  const waitingUrl = chrome.runtime.getURL('pages/waiting.html') +
+    `?domain=${encodeURIComponent(domain)}&url=${encodeURIComponent(originalUrl || '')}&eventId=${encodeURIComponent(eventId || '')}`;
+  chrome.tabs.update(tabId, { url: waitingUrl });
+
+  chrome.notifications.create(`pending_${Date.now()}`, {
+    type: 'basic', iconUrl: 'icons/icon48.png',
+    title: '⏳ SafeHos — Сайт на проверке',
+    message: domain,
+  });
+}
+
 function showApprovedPage(tabId, domain, originalUrl, responseTime) {
   const url = chrome.runtime.getURL('pages/approved.html') +
     `?domain=${encodeURIComponent(domain)}&url=${encodeURIComponent(originalUrl)}&time=${responseTime || 0}`;
@@ -203,12 +239,12 @@ async function approveAllTabsWithDomain(domain) {
     return;
   }
 
-  // Ищем вкладки на blocked.html с этим доменом
+  // Ищем вкладки на blocked.html или waiting.html с этим доменом
   try {
     const tabs = await chrome.tabs.query({});
     let found = false;
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes('pages/blocked.html') &&
+      if (tab.url && (tab.url.includes('pages/blocked.html') || tab.url.includes('pages/waiting.html')) &&
           tab.url.includes(encodeURIComponent(domain))) {
         showApprovedPage(tab.id, domain, `https://${domain}`, null);
         found = true;
@@ -347,6 +383,18 @@ async function startSync(token) {
 // MESSAGES
 // ============================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'AUTO_IDENTIFY') {
+    handleAutoIdentify()
+      .then(r => sendResponse(r))
+      .catch(e => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
+  if (message.type === 'MANUAL_IDENTIFY') {
+    identifyWithEmail(message.email)
+      .then(r => sendResponse(r))
+      .catch(e => sendResponse({ success: false, error: e.message }));
+    return true;
+  }
   if (message.type === 'LOGIN') {
     handleLogin(message.email, message.password)
       .then(r => sendResponse(r))
@@ -354,16 +402,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'GET_STATUS') {
-    getToken().then(token => sendResponse({ loggedIn: !!token }));
+    getExtensionStatus()
+      .then(status => sendResponse(status))
+      .catch(() => sendResponse({ identified: false }));
     return true;
-  }
-  if (message.type === 'LOGOUT') {
-    chrome.storage.session.clear();
-    domainCache.clear();
-    chrome.storage.local.remove('domainCache');
-    if (pollingInterval) clearInterval(pollingInterval);
-    if (syncInterval) clearInterval(syncInterval);
-    sendResponse({ success: true });
   }
   if (message.type === 'GET_DECISION') {
     const dec = resolvedDecisions.get(message.eventId);
@@ -383,6 +425,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+async function handleAutoIdentify() {
+  // Получаем email из Chrome profile (managed environment)
+  const info = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
+  if (!info || !info.email) {
+    throw new Error('Не удалось определить пользователя. Chrome profile не содержит email.');
+  }
+  return await identifyWithEmail(info.email);
+}
+
+async function identifyWithEmail(email) {
+  const res = await fetch(`${API_BASE}/auth/identify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Пользователь не зарегистрирован в системе');
+  await chrome.storage.session.set({
+    token: data.access_token, userId: data.user.id,
+    role: data.user.role, companyId: data.user.companyId, email: data.user.email,
+  });
+  startPolling(data.access_token);
+  startSync(data.access_token);
+  return { success: true, user: data.user };
+}
+
 async function handleLogin(email, password) {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
@@ -398,6 +466,35 @@ async function handleLogin(email, password) {
   startPolling(data.access_token);
   startSync(data.access_token);
   return { success: true, user: data.user };
+}
+
+async function getExtensionStatus() {
+  const data = await chrome.storage.session.get(['token', 'email', 'role', 'companyId']);
+  if (data.token) {
+    return {
+      identified: true,
+      email: data.email,
+      role: data.role,
+      companyId: data.companyId,
+      connected: true,
+    };
+  }
+  // Попробовать автоидентификацию при запросе статуса
+  try {
+    const result = await handleAutoIdentify();
+    if (result.success) {
+      return {
+        identified: true,
+        email: result.user.email,
+        role: result.user.role,
+        companyId: result.user.companyId,
+        connected: true,
+      };
+    }
+  } catch(e) {
+    // Chrome profile email не найден или пользователь не в системе
+  }
+  return { identified: false, connected: false };
 }
 
 async function getToken() {
